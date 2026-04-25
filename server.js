@@ -1,59 +1,41 @@
-const express = require("express")
-const cors = require("cors")
-const axios = require("axios")
 
-const app = express()
+import express from "express";
+import mercadopago from "mercadopago";
+import cors from "cors";
 
-app.use(cors())
-app.use(express.json())
+const app = express();
+app.use(express.json());
+app.use(cors());
 
-app.get("/", (req,res)=>{
-  res.send("Backend VendeAI rodando 🚀")
-})
+// 🔑 SUA CHAVE DO MERCADO PAGO
+mercadopago.configure({
+  access_token: "SUA_ACCESS_TOKEN_AQUI"
+});
 
-app.post("/ia", async (req,res)=>{
+// 🛒 CRIAR PAGAMENTO
+app.post("/criar-pagamento", async (req, res) => {
 
-  const mensagem = req.body.msg
+  const { nome, preco } = req.body;
 
-  try{
-
-    const resposta = await axios.post(
-      "https://api.openai.com/v1/chat/completions",
-      {
-        model:"gpt-4o-mini",
-        messages:[
-          {
-            role:"system",
-            content:"Você é um vendedor especialista"
-          },
-          {
-            role:"user",
-            content: mensagem
-          }
-        ]
-      },
-      {
-        headers:{
-          "Authorization": `Bearer ${process.env.OPENAI_KEY}`,
-          "Content-Type":"application/json"
+  try {
+    const pagamento = await mercadopago.preferences.create({
+      items: [
+        {
+          title: nome,
+          quantity: 1,
+          unit_price: Number(preco)
         }
-      }
-    )
+      ]
+    });
 
     res.json({
-      reply: resposta.data.choices[0].message.content
-    })
+      link: pagamento.body.init_point
+    });
 
-  }catch(err){
-    console.log(err.response?.data || err.message)
-
-    res.json({
-      reply: "Erro na IA 😢"
-    })
+  } catch (err) {
+    res.status(500).json({ erro: "Erro ao criar pagamento" });
   }
 
-})
+});
 
-app.listen(3000, ()=>{
-  console.log("Servidor rodando")
-})
+app.listen(3000, () => console.log("Servidor rodando 🚀"));
