@@ -1,27 +1,93 @@
 
-import express from "express";
-import fetch from "node-fetch";
+
+const express = require("express");
+const mercadopago = require("mercadopago");
+const admin = require("firebase-admin");
 
 const app = express();
 app.use(express.json());
 
-app.post("/chat", async (req,res)=>{
+// 🔐 FIREBASE ADMIN
+const serviceAccount = require("./serviceAccountKey.json");
 
-const response = await fetch("https://api.openai.com/v1/chat/completions",{
-method:"POST",
-headers:{
-"Authorization":"Bearer SUA_API_KEY",
-"Content-Type":"application/json"
-},
-body:JSON.stringify({
-model:"gpt-4o-mini",
-messages:[{role:"user",content:req.body.mensagem}]
-})
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
 });
 
-const data = await response.json();
+const db = admin.firestore();
 
-res.json({resposta:data.choices[0].message.content});
+// 💳 MERCADO PAGO
+mercadopago.configure({
+  access_token: "SEU_ACCESS_TOKEN_AQUI"
 });
 
-app.listen(3000);
+// 🚀 CRIAR PAGAMENTO
+app.post("/pagar", async (req, res) => {
+  try {
+    const { nome, preco, userId } = req.body;
+
+    const vendaRef = await db.collection("vendas").add({
+      nome,
+      preco,
+      userId,
+      status: "pendente",
+      criadoEm: new Date()
+    });
+
+    const preference = await mercadopago.preferences.create({
+      items: [
+        {
+          title: nome,
+          unit_price: Number(preco),
+          quantity: 1
+        }
+      ],
+      metadata: {
+        vendaId: vendaRef.id
+      },
+      notification_url: "https://SEU-BACKEND/webhook"
+    });
+
+    res.json({ link: preference.body.init_point });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).send("Erro ao criar pagamento");
+  }
+});
+
+// 🔔 WEBHOOK REAL
+app.post("/webhook", async (req, res) => {
+  try {
+    const data = req.body;
+
+    if (data.type === "payment") {
+      const payment = await mercadopago.payment.findById(data.data.id);
+
+      const vendaId = payment.body.metadata.vendaId;
+      const status = payment.body.status;
+
+      if (vendaId) {
+        await db.collection("vendas").doc(vendaId).update({
+          status: status,
+          atualizadoEm: new Date()
+        });
+
+        console.log("Venda atualizada:", vendaId, status);
+      }
+    }
+
+    res.sendStatus(200);
+
+  } catch (error) {
+    console.error(error);
+    res.sendStatus(500);
+  }
+});
+
+// 🌐 TESTE
+app.get("/", (req, res) => {
+  res.send("Backend rodando 🚀");
+});
+
+app.listen(3000, () => console.log("Servidor rodando na porta 3000"));
