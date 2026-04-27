@@ -1,13 +1,18 @@
 
 
-const express = require("express");
+
+
+ const express = require("express");
 const mercadopago = require("mercadopago");
 const admin = require("firebase-admin");
+const cors = require("cors");
+require("dotenv").config();
 
 const app = express();
 app.use(express.json());
+app.use(cors());
 
-// 🔐 FIREBASE ADMIN
+// 🔥 FIREBASE
 const serviceAccount = require("./serviceAccountKey.json");
 
 admin.initializeApp({
@@ -16,39 +21,54 @@ admin.initializeApp({
 
 const db = admin.firestore();
 
-// 💳 MERCADO PAGO
+// 💰 MERCADO PAGO
 mercadopago.configure({
-  access_token: "SEU_ACCESS_TOKEN_AQUI"
+  access_token: process.env.MP_ACCESS_TOKEN
 });
 
-// 🚀 CRIAR PAGAMENTO
-app.post("/pagar", async (req, res) => {
-  try {
-    const { nome, preco, userId } = req.body;
+// 🌐 TESTE
+app.get("/", (req, res) => {
+  res.send("Backend rodando 🚀");
+});
 
-    const vendaRef = await db.collection("vendas").add({
+
+// 🛒 CRIAR PAGAMENTO
+app.post("/criar-pagamento", async (req, res) => {
+  try {
+    const { nome, email, produto, valor } = req.body;
+
+    const vendaRef = db.collection("vendas").doc();
+
+    const pagamento = await mercadopago.preferences.create({
+      items: [
+        {
+          title: produto,
+          quantity: 1,
+          unit_price: Number(valor)
+        }
+      ],
+      payer: {
+        name: nome,
+        email: email
+      },
+      metadata: {
+        vendaId: vendaRef.id
+      },
+      notification_url: "https://SEU_BACKEND/webhook"
+    });
+
+    await vendaRef.set({
       nome,
-      preco,
-      userId,
+      email,
+      produto,
+      valor,
       status: "pendente",
       criadoEm: new Date()
     });
 
-    const preference = await mercadopago.preferences.create({
-      items: [
-        {
-          title: nome,
-          unit_price: Number(preco),
-          quantity: 1
-        }
-      ],
-      metadata: {
-        vendaId: vendaRef.id
-      },
-      notification_url: "https://SEU-BACKEND/webhook"
+    res.json({
+      link: pagamento.body.init_point
     });
-
-    res.json({ link: preference.body.init_point });
 
   } catch (error) {
     console.error(error);
@@ -56,12 +76,14 @@ app.post("/pagar", async (req, res) => {
   }
 });
 
-// 🔔 WEBHOOK REAL
+
+// 🔔 WEBHOOK (CONFIRMA PAGAMENTO)
 app.post("/webhook", async (req, res) => {
   try {
     const data = req.body;
 
     if (data.type === "payment") {
+
       const payment = await mercadopago.payment.findById(data.data.id);
 
       const vendaId = payment.body.metadata.vendaId;
@@ -85,9 +107,8 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
-// 🌐 TESTE
-app.get("/", (req, res) => {
-  res.send("Backend rodando 🚀");
-});
 
-app.listen(3000, () => console.log("Servidor rodando na porta 3000"));
+// 🚀 START
+app.listen(process.env.PORT, () => {
+  console.log("Servidor rodando 🚀");
+});
